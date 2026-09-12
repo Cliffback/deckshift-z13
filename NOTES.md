@@ -2,11 +2,47 @@
 
 Working notes for future development sessions. User-facing docs live in README.md.
 
-## Current state (2026-08-28) — PARKED; v0.2.2 on master UNTAGGED
+## Current state (2026-09-12) — PARKED; v0.2.2 on master UNTAGGED
 
 Parked 2026-08-28 pending the maintainer's hardware pass: full fresh
 install, Gaming Mode round-trip, uninstall test. Tag v0.2.2 once that
 comes back clean (gate details below).
+
+## 2026-09-12 — PR #8 reviewed (NVIDIA stale Steam UI); MangoHud finding
+
+PR #8 (Kuthumy) fixes stale Steam UI regions on NVIDIA by setting
+`MANGOHUD_CONFIG=alpha=0,background_alpha=0` for the NVIDIA GPU case. Reviewed,
+not merged — **asked for it to be opt-in, default off, rather than an automatic
+NVIDIA default.** v0.2.2 is cut FIRST; this lands separately so a finished
+release does not wait on a new discussion.
+
+**The mechanism, worth not re-deriving:**
+- `gamescope-session-plus:316-321` spawns `mangoapp` unconditionally in a
+  `while true` respawn loop whenever the binary exists — and we install
+  `mangohud` as a required package, so it is ALWAYS running.
+- Line 94 writes `no_display` into the session's own `MANGOHUD_CONFIGFILE`,
+  which is why it normally draws nothing.
+- ⚠️ **MangoHud ignores `MANGOHUD_CONFIGFILE` completely when `MANGOHUD_CONFIG`
+  is set, unless `read_cfg` is the first option.** That is the whole trick: the
+  env var discards `no_display`, mangoapp renders a transparent layer, and
+  Gamescope repaints the damage it was missing. Verified locally against a
+  config file containing `no_display` — unset → `parsing config:` logged;
+  `alpha=0,…` → no parse line at all; `read_cfg,alpha=0,…` → parse line back.
+
+**Why opt-in and not default:** the cost is not "hides the overlay" as the PR
+says, it DISABLES it. Steam toggles the overlay by rewriting
+`MANGOHUD_CONFIGFILE`, which is now never read, so levels 1-4 and preset
+switching go permanently inert on NVIDIA with no way back from the Steam UI.
+`fps_limit` and any user MangoHud config go too. `read_cfg` is NOT a way out —
+it restores file reading but brings `no_display` back and kills the fix. The two
+cannot both be satisfied through this channel.
+
+`uninstall.sh:273` already drops the whole conf file, so any new key is cleaned
+up — no uninstaller change needed for this.
+
+Also posted on #4 asking semakusut whether their symptom is actually the same:
+Kuthumy's is stale regions that repaint on pointer movement, semakusut's reads
+like true flicker/artefacting. Possibly two different faults.
 
 ## 2026-08-28 — three community PRs merged, v0.2.2 UNTAGGED
 
