@@ -3372,6 +3372,36 @@ verify_installation() {
   local missing_files=()
   local permission_issues=()
 
+  # Z13: `--verify` is also run standalone (and by the omarchy-rog-z13-setup
+  # installer) where sudo may not be cached. A bare `sudo test` then prompts for
+  # a password on stdin / fails, which made every root-owned file look MISSING
+  # (false "26 missing files"). Use `sudo -n` when it works; otherwise fall back
+  # to an unprivileged test and report files we genuinely cannot inspect as
+  # SKIPPED rather than MISSING.
+  local vcan_sudo=false
+  sudo -n true 2>/dev/null && vcan_sudo=true
+  local _vtest _vstat
+  if $vcan_sudo; then
+    _vtest() { sudo -n test -f "$1" 2>/dev/null; }
+    _vstat() { sudo -n stat -c "%a" "$1" 2>/dev/null; }
+  else
+    _vtest() { test -f "$1" 2>/dev/null; }
+    _vstat() { stat -c "%a" "$1" 2>/dev/null; }
+  fi
+  # 0 = present, 1 = absent, 2 = cannot tell without sudo (unreadable path)
+  _vcheck() {
+    if _vtest "$1"; then return 0; fi
+    # Without sudo, a file under a root-only directory (e.g. /etc/sudoers.d)
+    # is invisible to `test -f`, so treat an untraversable path as unknown.
+    if ! $vcan_sudo && [[ ! -x "$(dirname "$1")" ]]; then return 2; fi
+    return 1
+  }
+  if ! $vcan_sudo; then
+    echo "  ⚠ sudo not available — root-owned files are reported as SKIPPED, not missing"
+    echo "    Re-run with: sudo -v && $0 --verify"
+    echo ""
+  fi
+
   declare -A expected_files=(
     ["/usr/local/bin/gamescope-session-nm-wrapper"]="755:ChimeraOS session with NM wrapper"
     ["/usr/local/lib/gamescope-nvidia/gamescope"]="755:NVIDIA gamescope wrapper (--force-composition)"
@@ -3415,9 +3445,12 @@ verify_installation() {
 
     [[ "$description" == *"(optional)"* ]] && is_optional=true
 
-    if sudo test -f "$file" 2>/dev/null; then
+    local vstate=0
+    _vcheck "$file" || vstate=$?
+
+    if [[ $vstate -eq 0 ]]; then
       local actual_perm
-      actual_perm=$(sudo stat -c "%a" "$file" 2>/dev/null)
+      actual_perm=$(_vstat "$file")
 
       if [[ "$actual_perm" == "$expected_perm" ]]; then
         printf "  ✓ %-55s [%s] OK\n" "$file" "$actual_perm"
@@ -3426,14 +3459,14 @@ verify_installation() {
         permission_issues+=("$file: has $actual_perm, expected $expected_perm")
         all_ok=false
       fi
+    elif [[ $vstate -eq 2 ]]; then
+      printf "  - %-55s [SKIPPED] needs sudo to inspect\n" "$file"
+    elif $is_optional; then
+      printf "  - %-55s [SKIPPED] %s\n" "$file" "(optional)"
     else
-      if $is_optional; then
-        printf "  - %-55s [SKIPPED] %s\n" "$file" "(optional)"
-      else
-        printf "  ✗ %-55s [MISSING]\n" "$file"
-        missing_files+=("$file: $description")
-        all_ok=false
-      fi
+      printf "  ✗ %-55s [MISSING]\n" "$file"
+      missing_files+=("$file: $description")
+      all_ok=false
     fi
   done
 
@@ -3572,8 +3605,12 @@ verify_installation() {
     echo "  ✗ udisks2 NOT installed"
     all_ok=false
   fi
-  if sudo test -f "/etc/polkit-1/rules.d/50-udisks-gaming.rules" 2>/dev/null; then
+  local polkit_state=0
+  _vcheck "/etc/polkit-1/rules.d/50-udisks-gaming.rules" || polkit_state=$?
+  if [[ $polkit_state -eq 0 ]]; then
     echo "  ✓ udisks2 polkit rules configured"
+  elif [[ $polkit_state -eq 2 ]]; then
+    echo "  - udisks2 polkit rules present (needs sudo to inspect)"
   else
     echo "  ✗ udisks2 polkit rules NOT found"
     all_ok=false
