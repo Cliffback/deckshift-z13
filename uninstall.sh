@@ -192,10 +192,16 @@ for f in \
   /usr/local/bin/deckshift-settings \
   /usr/share/applications/deckshift-settings.desktop \
   /usr/lib/os-session-select \
-  /usr/local/lib/gamescope-nvidia
+  /usr/local/lib/gamescope-nvidia \
+  /usr/local/bin/gaming-mode-post-update \
+  /usr/local/bin/gaming-session-switch.pre-hotfix
 do
   drop "$f"
 done
+
+# The retired Z13 stack's pacman hook targets the same packages as DeckShift's
+# consolidated hook; drop it so no orphaned hook fires after uninstall.
+drop /etc/pacman.d/hooks/gaming-mode.hook
 
 info "Removing the SDDM session entry"
 drop /usr/share/wayland-sessions/gamescope-session-steam-nm.desktop "DeckShift's own entry"

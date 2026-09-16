@@ -1505,6 +1505,41 @@ remove_legacy_settings_tui() {
   fi
 }
 
+# Remove artifacts left by the retired Z13 gaming-mode stack (the bundled
+# Super_shift_S_release.sh + gaming-mode-hotfix.sh pair this fork replaced).
+#
+# The old pacman hook targets the same packages as DeckShift's consolidated
+# hook, and its post-update script rewrites /usr/lib/os-session-select with an
+# older body — so leaving it installed means every gamescope/sddm upgrade can
+# undo DeckShift's version. The stale Hyprland keybind file is dead under
+# Omarchy 4 (hyprland.conf is not read by the Lua config provider) and
+# redundant on pre-4 (DeckShift writes its own bind to bindings.conf).
+#
+# Idempotent: every step is a presence check first.
+remove_legacy_gaming_mode() {
+  local removed=0
+
+  local old_hook="/etc/pacman.d/hooks/gaming-mode.hook"
+  local old_post_update="/usr/local/bin/gaming-mode-post-update"
+  local old_backup="/usr/local/bin/gaming-session-switch.pre-hotfix"
+
+  for f in "$old_hook" "$old_post_update" "$old_backup"; do
+    [[ -e "$f" ]] || continue
+    sudo rm -f "$f" && removed=1
+  done
+
+  # Only remove the user keybind file if it is the one the old installer
+  # wrote (it contains switch-to-gaming), never a file the user authored.
+  local old_bind="$HOME/.config/hypr/gaming-mode.conf"
+  if [[ -f "$old_bind" ]] && grep -q "switch-to-gaming" "$old_bind" 2>/dev/null; then
+    rm -f "$old_bind" && removed=1
+  fi
+
+  if [[ $removed -eq 1 ]]; then
+    info "Removed the retired gaming-mode stack (old hook, post-update script, stale keybind)"
+  fi
+}
+
 # ==============================================================================
 # SESSION SWITCHING — The heart of the installer
 #
@@ -3864,6 +3899,7 @@ execute_setup() {
   setup_session_switching
   setup_xbox_controllers
   remove_legacy_settings_tui
+  remove_legacy_gaming_mode
   setup_shell_plugin
 
   if [ "$NEEDS_REBOOT" -eq 1 ]; then
