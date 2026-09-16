@@ -1,6 +1,6 @@
 # DeckShift
 
-**Version 0.2.2-z13.1** — Steam Deck-style gaming mode for [Omarchy](https://omarchy.com). Press the side button (Armory Crate / `XF86Launch3`) to toggle Gaming Mode (Steam Big Picture in Gamescope), or drive the whole thing from the control panel in your bar (`Super+Alt+G`).
+**Version 0.2.2-z13.2** — Steam Deck-style gaming mode for [Omarchy](https://omarchy.com). Press the side button (Armory Crate / `XF86Launch3`) to toggle Gaming Mode (Steam Big Picture in Gamescope), or drive the whole thing from the control panel in your bar (`Super+Alt+G`).
 
 Lineage: forked from Super-Shift-S-Omarchy-Deck-Mode, briefly renamed Omarchy Deck, then renamed DeckShift.
 
@@ -23,6 +23,10 @@ Lineage: forked from Super-Shift-S-Omarchy-Deck-Mode, briefly renamed Omarchy De
 [![DeckShift demo](https://img.youtube.com/vi/nj4pLh3spCs/maxresdefault.jpg)](https://youtu.be/nj4pLh3spCs)
 
 ## What's New
+
+### v0.2.2-z13.2 — Stop writing the dead pre-Quattro hyprland.conf
+
+`setup_fcitx_silence` appended `env = FCITX_NO_WAYLAND_DIAGNOSE,1` to `~/.config/hypr/hyprland.conf`. Omarchy 4's Lua config provider does not read that file, so the line did nothing while looking effective. The env is already set through `~/.config/environment.d/90-fcitx-wayland.conf` (imported into the session by uwsm, so it reaches Hyprland and every child process), which is now the only mechanism. The legacy `.conf` write is gone; the Lua-first/`.conf`-fallback pattern used for keybinds and autostart is unchanged.
 
 ### v0.2.2-z13.1 — Migration no longer strands Gaming Mode without a Steam client
 
@@ -638,6 +642,7 @@ yay -Rns gamescope-session-git gamescope-session-steam-git
 
 ## Changelog
 
+- **v0.2.2-z13.2** — Z13 fork: `setup_fcitx_silence` no longer appends `env = FCITX_NO_WAYLAND_DIAGNOSE,1` to the dead pre-Quattro `hyprland.conf` (Omarchy 4's Lua provider ignores it); the env is set only via `~/.config/environment.d`.
 - **v0.2.2-z13.1** — Z13 fork: migration-safe session cleanup. The old-file cleanup skips package-owned `/usr/bin/steamos-*` / `jupiter-biosupdate` (`pacman -Qo`), the client package is reinstalled in place instead of removed first, and the install forces `--aur` so `gamescope-session-steam-git` cannot resolve to the conflicting `cachyos/gamescope-session-cachyos`. `--verify` is sudo-aware (no false missing-file list without cached credentials) and checks `sessions.d/steam` so a missing Steam session client is caught. Install and uninstall also remove the retired stack's hook, post-update script, `.pre-hotfix` backup, and stale keybind file.
 - **v0.2.2** — Screen sharing after a Gaming Mode round-trip actually fixed: `switch-to-desktop` writes the recovery marker before the teardown that used to kill it, and `deckshift-portal-recovery` restarts the portal frontend Steam poisons inside gamescope (no more pipewire bounce, and it self-triggers on the broken state). Exiting Gaming Mode no longer clobbers the CPU governor/power profile with a guess. New `./uninstall.sh` with `--dry-run`. Opt-in Gaming Mode session logs from the control panel (dated files under `~/.local/state/omarchy/nosignal.deckshift/`, 10 newest kept). NVIDIA DRM modeset is detected via Omarchy's modprobe/sysfs (not only `/proc/cmdline`) and enabled with the same `nvidia.conf` drop-ins + initramfs rebuild, any bootloader. `--verify` reads `/etc/group` for `video`/`input`/`wheel` so group checks pass without logging out.
 - **v0.2.1** — Fix fresh installs failing with "target not found": dropped `lib32-openal`, `lib32-sdl2-compat` and `lib32-libvdpau` (removed from Arch multilib); installer now skips repo-dropped packages instead of aborting.
