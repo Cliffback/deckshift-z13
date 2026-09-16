@@ -2554,6 +2554,13 @@ fi
 
 # Inhibit suspend FIRST - prevents suspend when monitor detaches during switch
 sudo -n systemctl mask --runtime sleep.target suspend.target hibernate.target hybrid-sleep.target 2>/dev/null
+
+# Gaming-session sentinel. switch-to-desktop refuses to act without it, and the
+# controller gaming trigger checks it to avoid re-triggering inside Gamescope.
+# The wrapper writes it too, but only once the gamescope session is up — this
+# closes the window between the SDDM restart and the wrapper starting.
+echo "gamescope" > /tmp/.gaming-session-active
+
 sudo -n /usr/local/bin/gaming-session-switch gaming 2>/dev/null || {
   notify-send -u critical -t 3000 "Gaming Mode" "Failed to update session config" 2>/dev/null || true
 }
