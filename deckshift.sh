@@ -24,7 +24,7 @@
 #   - Installing all Steam/gaming dependencies and GPU drivers
 #   - Configuring NVIDIA DRM modeset (Omarchy modprobe + mkinitcpio)
 #   - Setting up session switching between Hyprland and Gamescope via SDDM
-#   - Creating keybinds (Super+Shift+S to enter, Super+Shift+R to exit)
+#   - Creating keybinds (XF86Launch3 side button toggles in/out)
 #   - Configuring NetworkManager handoff (iwd <-> NM) for Steam network access
 #   - Setting up performance tuning (CPU governor, GPU power, kernel sysctl)
 #   - Auto-mounting external drives with Steam libraries
@@ -1132,7 +1132,7 @@ EOF
 # Installs the core packages that the Gaming Mode scripts themselves need
 # (as opposed to Steam's dependencies which are handled separately).
 # These include:
-#   - python-evdev: Reads raw keyboard input for the Super+Shift+R hotkey
+#   - python-evdev: Reads raw keyboard input for the XF86Launch3 side button
 #   - libcap: Sets Linux capabilities on gamescope (cap_sys_nice for priority)
 #   - ntfs-3g: Mounts NTFS-formatted game drives (common for Windows dual-boot)
 #   - xcb-util-cursor: X11 cursor support needed by some Proton games
@@ -1304,7 +1304,7 @@ setup_shell_plugin() {
   if ! command -v omarchy-shell >/dev/null 2>&1; then
     warn "omarchy-shell not found — this build of Omarchy predates the Quickshell"
     warn "desktop, so the control panel can't be installed. Gaming Mode itself is"
-    warn "unaffected: use Super+Shift+S to enter and Super+Shift+R to return."
+    warn "unaffected: use the side button (XF86Launch3) to enter and return."
     return 0
   fi
 
@@ -1412,22 +1412,22 @@ remove_legacy_settings_tui() {
 # (Gamescope + Steam Big Picture).
 #
 # The switching mechanism works through SDDM (the display/login manager):
-#   1. User presses Super+Shift+S in Hyprland
+#   1. User presses the side button (XF86Launch3) in Hyprland
 #   2. switch-to-gaming script updates SDDM config to point to Gaming session
 #   3. SDDM restarts and auto-logs into the Gaming Mode session
 #   4. gamescope-session-nm-wrapper starts performance tuning, NetworkManager,
 #      drive mounting, keybind monitor, then launches Gamescope + Steam
-#   5. When done (Super+Shift+R or Steam > Exit to Desktop), the reverse happens
+#   5. When done (side button again or Steam > Exit to Desktop), the reverse happens
 #
 # This function creates ALL the scripts and config files needed for this flow:
 #   - Session wrapper (gamescope-session-nm-wrapper)
 #   - Switch scripts (switch-to-gaming, switch-to-desktop)
-#   - Keybind monitor (Python daemon using evdev for Super+Shift+R)
+#   - Keybind monitor (Python daemon using evdev for XF86Launch3)
 #   - NetworkManager start/stop scripts (iwd <-> NM handoff)
 #   - Steam library auto-mount daemon
 #   - SDDM session entry and config
 #   - Polkit and sudoers rules for passwordless operation
-#   - Hyprland keybind for Super+Shift+S
+#   - Hyprland keybind for XF86Launch3 (side button)
 #
 # It also installs ChimeraOS's gamescope-session packages from AUR, which
 # provide the base session framework that the Steam Deck uses.
@@ -1548,7 +1548,7 @@ setup_session_switching() {
 
   echo "  This will:"
   echo "    - Install gamescope-session-git and gamescope-session-steam-git from AUR"
-  echo "    - Configure Super+Shift+S to switch to Gaming Mode"
+  echo "    - Configure the side button (XF86Launch3) to switch to Gaming Mode"
   echo "    - Configure Steam's 'Exit to Desktop' to return to Hyprland"
   echo ""
   read -p "Set up session switching? [Y/n]: " -n 1 -r
@@ -2191,7 +2191,7 @@ NVIDIA_WRAPPER
   #   2. Adds NVIDIA wrapper to PATH if needed
   #   3. Starts NetworkManager for Steam's network access
   #   4. Launches steam-library-mount daemon for external drive detection
-  #   5. Starts the keybind monitor (listens for Super+Shift+R to exit)
+  #   5. Starts the keybind monitor (listens for XF86Launch3 to exit)
   #   6. Sets Steam-specific environment variables
   #   7. Launches gamescope-session-plus (the actual Gamescope + Steam session)
   #
@@ -2433,7 +2433,7 @@ fi
 
 if $keybind_ok; then
     /usr/local/bin/gaming-keybind-monitor &
-    log "Keybind monitor started (Super+Shift+R to exit)"
+    log "Keybind monitor started (XF86Launch3 side button to exit)"
 else
     log "Keybind monitor NOT started"
 fi
@@ -2501,7 +2501,7 @@ OS_SESSION_SELECT
   sudo chmod +x "$os_session_select"
   info "Created $os_session_select"
 
-  # switch-to-gaming — Called when Super+Shift+S is pressed in Hyprland
+  # switch-to-gaming — Called when the side button (XF86Launch3) is pressed
   #
   # This script handles the transition from Desktop to Gaming Mode:
   #   1. Masks suspend targets — prevents the system from sleeping when the
@@ -2591,7 +2591,7 @@ SWITCH_SCRIPT
   sudo chmod +x "$switch_script"
   info "Created $switch_script"
 
-  # switch-to-desktop — Called when Super+Shift+R is pressed in Gaming Mode
+  # switch-to-desktop — Called when the side button is pressed in Gaming Mode
   #
   # This script handles the transition back from Gaming to Desktop Mode:
   #   1. Unmasks suspend targets (re-enables sleep/hibernate)
@@ -2699,7 +2699,7 @@ SWITCH_DESKTOP
   sudo chmod +x "$switch_desktop_script"
   info "Created $switch_desktop_script"
 
-  # Keybind Monitor — Python daemon for Super+Shift+R in Gaming Mode
+  # Keybind Monitor — Python daemon for XF86Launch3 in Gaming Mode
   #
   # Inside Gamescope, Hyprland isn't running so its keybinds don't work.
   # This Python script uses python-evdev to read raw keyboard input directly
@@ -2707,7 +2707,7 @@ SWITCH_DESKTOP
   #
   # It uses Linux's selector (epoll) interface to efficiently monitor multiple
   # keyboard devices simultaneously without busy-waiting. When it detects
-  # Super+Shift+R, it calls switch-to-desktop to return to Hyprland.
+  # the side button, it calls switch-to-desktop to return to Hyprland.
   #
   # The user must be in the "input" group to read /dev/input/ devices.
   info "Creating gaming mode keybind monitor..."
@@ -2733,8 +2733,14 @@ except ImportError:
     log("FATAL: python-evdev not installed", error=True)
     sys.exit(1)
 
-def find_keyboards():
-    keyboards = []
+# Z13: the side button (Armory Crate key) emits KEY_PROG3 (XF86Launch3) and is
+# the Gaming Mode toggle. On the desktop the same key enters Gaming Mode via the
+# Hyprland bind; inside Gamescope, Hyprland is gone, so this daemon watches for
+# the raw evdev code and exits back to the desktop. Super+Shift+R is NOT watched
+# — Fn+F6 emits Super+Shift+S at firmware level and Super+Shift+R is the ROG
+# Control Center on the desktop.
+def find_devices():
+    devices = []
     devices_checked = 0
     permission_errors = 0
     for path in evdev.list_devices():
@@ -2744,24 +2750,22 @@ def find_keyboards():
             caps = device.capabilities()
             if ecodes.EV_KEY in caps:
                 keys = caps[ecodes.EV_KEY]
-                if ecodes.KEY_A in keys and ecodes.KEY_R in keys:
-                    keyboards.append(device)
+                if ecodes.KEY_PROG3 in keys:
+                    devices.append(device)
         except PermissionError:
             permission_errors += 1
         except Exception:
             continue
-    if permission_errors > 0 and not keyboards:
+    if permission_errors > 0 and not devices:
         log(f"FATAL: Permission denied on {permission_errors}/{devices_checked} input devices.", error=True)
-    return keyboards
+    return devices
 
-def monitor_keyboards(keyboards):
-    meta_pressed = False
-    shift_pressed = False
+def monitor_devices(devices):
     from selectors import DefaultSelector, EVENT_READ
     selector = DefaultSelector()
-    for kbd in keyboards:
-        selector.register(kbd, EVENT_READ)
-    log(f"Monitoring {len(keyboards)} keyboard(s) for Super+Shift+R...")
+    for dev in devices:
+        selector.register(dev, EVENT_READ)
+    log(f"Monitoring {len(devices)} device(s) for XF86Launch3 (side button)...")
     try:
         while True:
             for key, mask in selector.select():
@@ -2770,15 +2774,10 @@ def monitor_keyboards(keyboards):
                     for event in device.read():
                         if event.type != ecodes.EV_KEY:
                             continue
-                        if event.code in (ecodes.KEY_LEFTMETA, ecodes.KEY_RIGHTMETA):
-                            meta_pressed = event.value > 0
-                        elif event.code in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT):
-                            shift_pressed = event.value > 0
-                        elif event.code == ecodes.KEY_R and event.value == 1:
-                            if meta_pressed and shift_pressed:
-                                log("Super+Shift+R detected! Switching to desktop...")
-                                subprocess.run(['/usr/local/bin/switch-to-desktop'])
-                                return
+                        if event.code == ecodes.KEY_PROG3 and event.value == 1:
+                            log("XF86Launch3 (side button) detected! Switching to desktop...")
+                            subprocess.run(['/usr/local/bin/switch-to-desktop'])
+                            return
                 except Exception as e:
                     log(f"Read error: {e}", error=True)
                     continue
@@ -2789,11 +2788,11 @@ def monitor_keyboards(keyboards):
 
 def main():
     time.sleep(2)
-    keyboards = find_keyboards()
-    if not keyboards:
-        log("FATAL: No accessible keyboards found!", error=True)
+    devices = find_devices()
+    if not devices:
+        log("FATAL: No devices with KEY_PROG3 found!", error=True)
         sys.exit(1)
-    monitor_keyboards(keyboards)
+    monitor_devices(devices)
 
 if __name__ == '__main__':
     main()
@@ -3059,19 +3058,23 @@ SUDOERS_SWITCH
   local hypr_bindings_conf="${user_home}/.config/hypr/bindings.conf"
 
   if [[ -f "$hypr_bindings_lua" ]]; then
-    # Omarchy 4: bindings live in Lua; bindings.conf is ignored. Omarchy's
-    # defaults claim SUPER+SHIFT+S, and duplicate Hyprland binds BOTH fire,
-    # so the default must be unbound before taking the key.
+    # Omarchy 4: bindings live in Lua; bindings.conf is ignored.
+    #
+    # Z13: the side button (Armory Crate / XF86Launch3) is the Gaming Mode
+    # toggle, NOT Super+Shift+S. On the ROG Flow Z13, Fn+F6 emits Super+Shift+S
+    # at the firmware level, so binding Gaming Mode to that combo would hijack
+    # the screenshot key. XF86Launch3 is unclaimed by the Omarchy defaults, so
+    # no hl.unbind() is needed.
     if grep -q "switch-to-gaming" "$hypr_bindings_lua" 2>/dev/null; then
       info "Gaming Mode keybind already exists in bindings.lua"
     else
       sudo -u "$current_user" tee -a "$hypr_bindings_lua" > /dev/null << 'HYPR_GAMING_LUA'
 
--- DeckShift — reclaim SUPER+SHIFT+S from the Omarchy default, bind Gaming Mode
-hl.unbind("SUPER + SHIFT + S")
-o.bind("SUPER + SHIFT + S", "Gaming Mode", "/usr/local/bin/switch-to-gaming")
+-- DeckShift — side button (Armory Crate key) toggles Gaming Mode.
+-- Super+Shift+S is left alone: Fn+F6 emits it at firmware level for screenshots.
+o.bind("XF86Launch3", "Gaming Mode", "/usr/local/bin/switch-to-gaming")
 HYPR_GAMING_LUA
-      info "Added Gaming Mode keybind to bindings.lua"
+      info "Added Gaming Mode keybind (XF86Launch3 side button) to bindings.lua"
     fi
   elif [[ -f "$hypr_bindings_conf" ]]; then
     if grep -q "switch-to-gaming" "$hypr_bindings_conf" 2>/dev/null; then
@@ -3079,13 +3082,14 @@ HYPR_GAMING_LUA
     else
       cat >> "$hypr_bindings_conf" << 'HYPR_GAMING'
 
-bindd = SUPER SHIFT, S, Gaming Mode, exec, /usr/local/bin/switch-to-gaming
+# DeckShift — side button (Armory Crate key) toggles Gaming Mode.
+bindd = , XF86Launch3, Gaming Mode, exec, /usr/local/bin/switch-to-gaming
 HYPR_GAMING
-      info "Added Gaming Mode keybind to bindings.conf"
+      info "Added Gaming Mode keybind (XF86Launch3 side button) to bindings.conf"
     fi
   else
     warn "No bindings.lua or bindings.conf under ${user_home}/.config/hypr - skipping keybind setup"
-    warn "Add manually to bindings.lua: o.bind(\"SUPER + SHIFT + S\", \"Gaming Mode\", \"/usr/local/bin/switch-to-gaming\")"
+    warn "Add manually to bindings.lua: o.bind(\"XF86Launch3\", \"Gaming Mode\", \"/usr/local/bin/switch-to-gaming\")"
   fi
 
   info "Steam compatibility scripts provided by gamescope-session-steam-git"
@@ -3138,8 +3142,8 @@ HYPR_GAMING
   echo "================================================================"
   echo ""
   echo "  Usage:"
-  echo "    - Press Super+Shift+S in Hyprland to switch to Gaming Mode"
-  echo "    - Press Super+Shift+R in Gaming Mode to return to Hyprland"
+  echo "    - Press the side button (Armory Crate / XF86Launch3) to switch to Gaming Mode"
+  echo "    - Press it again in Gaming Mode to return to Hyprland"
   echo "    - (Steam's Power > Exit to Desktop also works as fallback)"
   echo ""
   echo "  ChimeraOS packages installed:"
@@ -3153,7 +3157,7 @@ HYPR_GAMING
   echo "    - /usr/lib/os-session-select"
   echo "    - /usr/local/bin/switch-to-gaming"
   echo "    - /usr/local/bin/switch-to-desktop"
-  echo "    - /usr/local/bin/gaming-keybind-monitor (Super+Shift+R)"
+  echo "    - /usr/local/bin/gaming-keybind-monitor (XF86Launch3 side button)"
   echo "    - ~/.config/hypr/bindings.lua (keybind added; bindings.conf on pre-Omarchy-4)"
   echo ""
   echo "  NetworkManager integration (Steam network access):"
@@ -3220,8 +3224,8 @@ verify_installation() {
     ["/usr/local/bin/gaming-session-switch"]="755:Session switching helper (gaming/desktop)"
     ["/usr/lib/os-session-select"]="755:Steam Exit to Desktop handler"
     ["/usr/local/bin/switch-to-gaming"]="755:Hyprland to Gaming Mode switcher"
-    ["/usr/local/bin/switch-to-desktop"]="755:Gaming Mode to Desktop switcher (Super+Shift+R)"
-    ["/usr/local/bin/gaming-keybind-monitor"]="755:Keybind monitor for Super+Shift+R"
+    ["/usr/local/bin/switch-to-desktop"]="755:Gaming Mode to Desktop switcher (side button)"
+    ["/usr/local/bin/gaming-keybind-monitor"]="755:Keybind monitor for XF86Launch3"
     ["/usr/local/bin/deckshift-portal-recovery"]="755:xdg-desktop-portal restart helper (post-Gaming-Mode)"
     ["/usr/local/bin/gamescope-nm-start"]="755:NetworkManager start script"
     ["/usr/local/bin/gamescope-nm-stop"]="755:NetworkManager stop script"
@@ -3284,15 +3288,15 @@ verify_installation() {
   local hypr_bindings_lua="$HOME/.config/hypr/bindings.lua"
   local hypr_bindings="$HOME/.config/hypr/bindings.conf"
   if [[ -f "$hypr_bindings_lua" ]]; then
-    if grep -q "switch-to-gaming" "$hypr_bindings_lua" 2>/dev/null; then
-      echo "  ✓ Gaming Mode keybind (Super+Shift+S) configured in bindings.lua"
+    if grep -q "XF86Launch3" "$hypr_bindings_lua" 2>/dev/null; then
+      echo "  ✓ Gaming Mode keybind (XF86Launch3 side button) configured in bindings.lua"
     else
       echo "  ✗ Gaming Mode keybind NOT found in bindings.lua (Omarchy 4 ignores bindings.conf)"
       all_ok=false
     fi
   elif [[ -f "$hypr_bindings" ]]; then
-    if grep -q "switch-to-gaming" "$hypr_bindings" 2>/dev/null; then
-      echo "  ✓ Gaming Mode keybind (Super+Shift+S) configured"
+    if grep -q "XF86Launch3" "$hypr_bindings" 2>/dev/null; then
+      echo "  ✓ Gaming Mode keybind (XF86Launch3 side button) configured"
     else
       echo "  ✗ Gaming Mode keybind NOT found in bindings.conf"
       all_ok=false
@@ -3421,8 +3425,8 @@ verify_installation() {
   fi
 
   echo ""
-  echo "  KEYBIND MONITOR (Super+Shift+R):"
-  echo "  ---------------------------------"
+  echo "  KEYBIND MONITOR (XF86Launch3 side button):"
+  echo "  ------------------------------------------"
   local keybind_ok=true
 
   if check_package "python-evdev"; then
@@ -3468,9 +3472,9 @@ verify_installation() {
   fi
 
   if $keybind_ok; then
-    echo "  → Super+Shift+R keybind should work"
+    echo "  → XF86Launch3 side-button toggle should work"
   else
-    echo "  → Super+Shift+R keybind will NOT work (use Steam > Power > Exit to Desktop)"
+    echo "  → Side-button toggle will NOT work (use Steam > Power > Exit to Desktop)"
   fi
 
   echo ""
@@ -3502,7 +3506,7 @@ verify_installation() {
     fi
   done
   if $needs_logout; then
-    echo "  → Group membership is saved; Super+Shift+R / passwordless session"
+    echo "  → Group membership is saved; side-button toggle / passwordless session"
     echo "    switch need a new login before they apply."
   fi
 
@@ -3636,8 +3640,8 @@ execute_setup() {
     echo ""
     echo "  Dependencies, GPU configuration, and session switching are ready."
     echo ""
-    echo "  To switch to Gaming Mode: Press Super+Shift+S"
-    echo "  To return to Desktop:     Press Super+Shift+R"
+    echo "  To switch to Gaming Mode: Press the side button (XF86Launch3)"
+    echo "  To return to Desktop:     Press the side button again"
     echo ""
   fi
 
