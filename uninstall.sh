@@ -210,6 +210,7 @@ for f in \
   /etc/udev/rules.d/99-gaming-performance.rules \
   /etc/security/limits.d/99-gaming-memlock.conf \
   /usr/share/libalpm/hooks/deckshift-gamescope-cap.hook \
+  /usr/local/bin/deckshift-post-update \
   /etc/modprobe.d/blacklist-xpad.conf \
   /etc/modules-load.d/xpadneo.conf
 do

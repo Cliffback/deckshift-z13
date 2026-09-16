@@ -1195,28 +1195,121 @@ setup_requirements() {
 }
 
 # Pacman strips file capabilities (security.capability xattr) every time it
-# replaces the gamescope binary on upgrade. Without cap_sys_nice the
-# compositor thread loses its priority boost and performance mode silently
-# regresses (no error surfaced). This hook re-applies the cap PostTransaction
-# whenever gamescope is installed or upgraded. Idempotent — safe to re-run.
+# replaces the gamescope binary on upgrade. Without cap_sys_nice the compositor
+# thread loses its priority boost and performance mode silently regresses (no
+# error surfaced).
+#
+# The same upgrades also clobber other DeckShift-managed state: gamescope-session
+# and sddm packages can restore the competing session desktop files, re-add the
+# stock os-session-select, and heroic updates overwrite its gamescope patch. A
+# single PostTransaction hook re-applies all of it, so the setup survives
+# package updates without a manual re-run. Idempotent — safe to re-run.
 install_gamescope_cap_hook() {
   local hook_path="/usr/share/libalpm/hooks/deckshift-gamescope-cap.hook"
+  local post_update="/usr/local/bin/deckshift-post-update"
+
   sudo install -d -m 755 /usr/share/libalpm/hooks
+
+  sudo tee "$post_update" > /dev/null << 'POST_UPDATE'
+#!/bin/bash
+# Managed by DeckShift — DO NOT EDIT.
+# Re-applies DeckShift-managed state after package upgrades. Runs as root from
+# a pacman PostTransaction hook, so no sudo/auth is needed here.
+LOG_TAG="deckshift-post-update"
+log() { logger -t "$LOG_TAG" "$*"; echo "$*"; }
+
+# 1. Re-apply cap_sys_nice to gamescope.
+if command -v gamescope &>/dev/null; then
+  if ! getcap "$(command -v gamescope)" 2>/dev/null | grep -q 'cap_sys_nice'; then
+    setcap 'cap_sys_nice=eip' "$(command -v gamescope)" 2>/dev/null && \
+      log "Restored cap_sys_nice on gamescope" || \
+      log "WARNING: Failed to restore cap_sys_nice on gamescope"
+  fi
+fi
+
+# 2. Restore DeckShift's Gaming Mode session entry if a package removed it.
+SESSION_DESKTOP="/usr/share/wayland-sessions/gamescope-session-steam-nm.desktop"
+if [[ ! -f "$SESSION_DESKTOP" ]]; then
+  cat > "$SESSION_DESKTOP" << 'DESK'
+[Desktop Entry]
+Name=Gaming Mode (ChimeraOS)
+Comment=Steam Big Picture with ChimeraOS gamescope-session
+Exec=/usr/local/bin/gamescope-session-nm-wrapper
+Type=Application
+DesktopNames=gamescope
+DESK
+  log "Restored $SESSION_DESKTOP"
+fi
+
+# 3. Re-disable competing session desktop files.
+for unwanted in plasma.desktop gnome.desktop gnome-wayland.desktop kde-plasma.desktop; do
+  if [[ -f "/usr/share/wayland-sessions/$unwanted" ]]; then
+    mv "/usr/share/wayland-sessions/$unwanted" "/usr/share/wayland-sessions/${unwanted}.disabled" 2>/dev/null && \
+      log "Disabled competing session: $unwanted"
+  fi
+done
+
+# 4. Restore DeckShift's os-session-select if a package overwrote it.
+OS_SELECT="/usr/lib/os-session-select"
+if [[ -f "$OS_SELECT" ]] && ! grep -q "gaming-session-switch" "$OS_SELECT" 2>/dev/null; then
+  cat > "$OS_SELECT" << 'OSSEL'
+#!/bin/bash
+rm -f /tmp/.gaming-session-active
+sudo -n /usr/local/bin/gaming-session-switch desktop 2>/dev/null || {
+  echo "Warning: Failed to update session config"
+}
+timeout 5 steam -shutdown 2>/dev/null || true
+sleep 1
+nohup sudo -n systemctl restart sddm &>/dev/null &
+disown
+exit 0
+OSSEL
+  chmod +x "$OS_SELECT"
+  log "Restored DeckShift os-session-select"
+fi
+
+# 5. Re-patch Heroic for Gamescope if it was updated.
+HEROIC_PATCH="/usr/local/bin/patch-heroic-gamescope"
+HEROIC_ASAR="/opt/Heroic/resources/app.asar"
+if [[ -x "$HEROIC_PATCH" ]] && [[ -f "$HEROIC_ASAR" ]]; then
+  if ! npx --yes asar extract "$HEROIC_ASAR" /tmp/deckshift-heroic-check-$$ &>/dev/null; then
+    log "Could not extract Heroic asar to check patch status"
+  elif ! grep -q 'ozone-platform=x11' /tmp/deckshift-heroic-check-$$/build/main/main.js 2>/dev/null; then
+    rm -rf /tmp/deckshift-heroic-check-$$
+    log "Re-patching Heroic for Gamescope..."
+    "$HEROIC_PATCH" && log "Heroic re-patched" || \
+      log "WARNING: Heroic patch returned non-zero"
+  else
+    rm -rf /tmp/deckshift-heroic-check-$$
+  fi
+fi
+
+log "DeckShift post-update complete"
+POST_UPDATE
+  sudo chmod 755 "$post_update"
+
   sudo tee "$hook_path" > /dev/null << 'HOOK'
 # Managed by DeckShift — DO NOT EDIT.
-# Re-applies cap_sys_nice to gamescope after every pacman upgrade. File
-# capabilities live on the inode as a security.capability xattr and are lost
-# when pacman replaces the binary.
+# Re-applies DeckShift-managed state after upgrades: gamescope's cap_sys_nice
+# (file capabilities live on the inode and are lost when pacman replaces the
+# binary), the Gaming Mode session entry, the competing-session disables, the
+# os-session-select handler, and Heroic's gamescope patch. See
+# /usr/local/bin/deckshift-post-update.
 [Trigger]
-Type = Path
 Operation = Install
 Operation = Upgrade
-Target = usr/bin/gamescope
+Type = Package
+Target = gamescope
+Target = gamescope-session-git
+Target = gamescope-session-steam-git
+Target = sddm
+Target = heroic-games-launcher-bin
 
 [Action]
-Description = DeckShift: re-applying cap_sys_nice to gamescope
+Description = DeckShift: restoring Gaming Mode configuration after update...
 When = PostTransaction
-Exec = /usr/bin/setcap cap_sys_nice=eip /usr/bin/gamescope
+Exec = /usr/local/bin/deckshift-post-update
+NeedsTargets
 HOOK
   sudo chmod 644 "$hook_path"
   info "Installed pacman hook: $hook_path"
@@ -1623,6 +1716,22 @@ setup_session_switching() {
   info "Found $dgpu_type on $dgpu_card"
   info "Display selection (monitor / resolution / refresh) is left to the user."
   info "After install, open the app menu (Super+Space) → 'DeckShift Settings' to configure."
+
+  # Z13: disable competing session desktop files.
+  #
+  # SDDM's Relogin=true falls back to any available session if the configured
+  # one fails to start; a stray plasma/gnome entry can then be auto-picked and
+  # dump the user into the wrong desktop. Disabling them leaves only Hyprland
+  # and Gaming Mode, so a failure lands somewhere useful. Best-effort: the
+  # files are package-owned and may reappear on upgrade, which is why the
+  # consolidated pacman hook re-applies this.
+  info "Disabling competing session desktop files..."
+  for unwanted in plasma.desktop gnome.desktop gnome-wayland.desktop kde-plasma.desktop; do
+    if [[ -f "/usr/share/wayland-sessions/$unwanted" ]]; then
+      sudo mv "/usr/share/wayland-sessions/$unwanted" "/usr/share/wayland-sessions/${unwanted}.disabled"
+      info "  Disabled: $unwanted"
+    fi
+  done
 
   info "Checking for old custom session files to clean up..."
 
@@ -3292,7 +3401,8 @@ verify_installation() {
     ["/etc/security/limits.d/99-gaming-memlock.conf"]="644:Memlock limits"
     ["/etc/pipewire/pipewire.conf.d/10-gaming-latency.conf"]="644:PipeWire low-latency"
     ["/etc/environment.d/99-shader-cache.conf"]="644:Shader cache config"
-    ["/usr/share/libalpm/hooks/deckshift-gamescope-cap.hook"]="644:Pacman hook re-applies cap_sys_nice on gamescope upgrade (optional)"
+    ["/usr/share/libalpm/hooks/deckshift-gamescope-cap.hook"]="644:Pacman hook re-applies Gaming Mode state after upgrades (optional)"
+    ["/usr/local/bin/deckshift-post-update"]="755:Pacman hook post-update script (optional)"
   )
   echo "  FILE STATUS:"
   echo "  ------------"
