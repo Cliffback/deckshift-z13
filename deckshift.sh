@@ -1791,6 +1791,34 @@ NM_UNMANAGED
     info "Configured NetworkManager to not manage ethernet interfaces"
   fi
 
+  # Z13 / Omarchy 4 (Quattro): clean up stale handoff configs from older runs.
+  #
+  # Quattro retires iwd and systemd-networkd in favour of NetworkManager, so a
+  # file written by an older run — when that backend was still active — becomes
+  # actively harmful once the backend is gone: the iwd backend no longer exists
+  # (Wi-Fi dies), and marking en*/eth* unmanaged leaves dock Ethernet with no
+  # manager. Remove each file only when its backend is no longer active, so the
+  # live handoff on pre-Quattro systems is left intact.
+  local nm_stale_removed=0
+  if ! systemctl is-active --quiet iwd && sudo test -f /etc/NetworkManager/conf.d/10-iwd-backend.conf; then
+    sudo rm -f /etc/NetworkManager/conf.d/10-iwd-backend.conf
+    info "Removed stale NetworkManager iwd-backend config (iwd no longer active)"
+    nm_stale_removed=1
+  fi
+  if ! systemctl is-active --quiet systemd-networkd && sudo test -f /etc/NetworkManager/conf.d/20-unmanaged-systemd.conf; then
+    sudo rm -f /etc/NetworkManager/conf.d/20-unmanaged-systemd.conf
+    info "Removed stale NetworkManager unmanaged-systemd config (networkd no longer active)"
+    nm_stale_removed=1
+  fi
+  if [[ $nm_stale_removed -eq 1 ]] && systemctl is-active --quiet NetworkManager.service; then
+    sudo systemctl restart NetworkManager.service 2>/dev/null || \
+      sudo nmcli general reload conf 2>/dev/null || true
+    info "Restarted NetworkManager to apply config removal"
+  fi
+
+  # The nm-stop helper is rewritten below with a Quattro-safe body; on Quattro,
+  # NetworkManager is permanent, so it must never stop it or restart iwd.
+
   local nm_start_script="/usr/local/bin/gamescope-nm-start"
   sudo tee "$nm_start_script" > /dev/null << 'NM_START'
 #!/bin/bash
@@ -1836,45 +1864,18 @@ NM_MARKER="/tmp/.gamescope-started-nm"
 LOG_TAG="gamescope-nm"
 log() { logger -t "$LOG_TAG" "$*"; echo "$*"; }
 
-if [ -f "$NM_MARKER" ]; then
-    rm -f "$NM_MARKER"
-    if systemctl is-active --quiet NetworkManager.service; then
-        log "Stopping NetworkManager service..."
-        systemctl stop NetworkManager.service 2>/dev/null || true
-        sleep 1
-    fi
+# Omarchy 4 (Quattro) uses NetworkManager as the permanent network manager and
+# no longer ships iwd. The old iwd <-> NetworkManager handoff is obsolete, so
+# this helper only clears the gaming-session marker and ensures NetworkManager
+# stays up. It must never stop NetworkManager or restart iwd.
+rm -f "$NM_MARKER"
 
-    # Restart iwd to restore WiFi connection (must restart, not just start,
-    # because iwd may be "active" but not managing the interface while NM had control)
-    log "Restarting iwd to restore WiFi..."
-    systemctl restart iwd.service 2>/dev/null || true
-    sleep 3
-
-    # Find the wireless interface dynamically
-    WIFI_IFACE=$(iw dev 2>/dev/null | awk '/Interface/{print $2; exit}')
-    if [ -z "$WIFI_IFACE" ]; then
-        WIFI_IFACE=$(ls /sys/class/net/ 2>/dev/null | grep -E '^wl' | head -1)
-    fi
-
-    if [ -n "$WIFI_IFACE" ]; then
-        # Verify WiFi restoration (iwd auto-connects to known networks)
-        if iwctl station "$WIFI_IFACE" show 2>/dev/null | grep -qi "connected"; then
-            log "WiFi restored on $WIFI_IFACE"
-        else
-            log "Triggering WiFi scan on $WIFI_IFACE..."
-            iwctl station "$WIFI_IFACE" scan 2>/dev/null || true
-            sleep 3
-            if iwctl station "$WIFI_IFACE" show 2>/dev/null | grep -qi "connected"; then
-                log "WiFi connected on $WIFI_IFACE after scan"
-            else
-                log "WiFi on $WIFI_IFACE may need manual reconnection via iwctl"
-            fi
-        fi
-    else
-        log "No wireless interface found - skipping WiFi verification"
-    fi
+if ! systemctl is-active --quiet NetworkManager.service; then
+    log "NetworkManager not running - starting it..."
+    systemctl start NetworkManager.service 2>/dev/null || \
+        log "WARNING: Failed to start NetworkManager"
 else
-    log "No marker file found - NetworkManager was not started by gaming session"
+    log "NetworkManager running - nothing to do"
 fi
 NM_STOP
   sudo chmod +x "$nm_stop_script"
