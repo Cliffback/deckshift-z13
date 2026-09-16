@@ -2278,6 +2278,27 @@ deckshift_begin_session_log() {
 
 deckshift_begin_session_log
 
+# Set the power profile through Omarchy's helper when it is available.
+#
+# Omarchy's `omarchy-powerprofiles-init` runs on every Hyprland start and calls
+# `omarchy-powerprofiles-set autodetect`, which reads the per-AC/battery state
+# file. Writing the profile with plain `powerprofilesctl set` leaves that state
+# file stale, so the next desktop session clobbers the restore (the documented
+# "profile stays on performance after Gaming Mode exit" caveat). Going through
+# `omarchy-powerprofiles-set autodetect <profile>` sets the profile AND records
+# it for the current power source, so the restore sticks.
+set_power_profile() {
+    local profile="$1"
+    [[ -n "$profile" ]] || return 0
+    if command -v omarchy-powerprofiles-set &>/dev/null; then
+        omarchy-powerprofiles-set autodetect "$profile" 2>/dev/null && return 0
+    fi
+    if command -v powerprofilesctl &>/dev/null; then
+        sudo -n powerprofilesctl set "$profile" 2>/dev/null || \
+            powerprofilesctl set "$profile" 2>/dev/null
+    fi
+}
+
 # Capture the user's actual pre-Gaming-Mode CPU governor + power profile so we
 # can restore those exact values on exit, instead of guessing "powersave/balanced"
 # (which was wrong on systems whose default is schedutil or power-saver).
@@ -2320,12 +2341,8 @@ enable_performance_mode() {
         done
     fi
 
-    # Set power profile to performance — sudo -n bypasses the polkit prompt
-    # (NOPASSWD allowed for `powerprofilesctl set *` in /etc/sudoers.d/gaming-session-switch)
-    if command -v powerprofilesctl &>/dev/null; then
-        sudo -n powerprofilesctl set performance 2>/dev/null || \
-            powerprofilesctl set performance 2>/dev/null && log "Power profile set to performance"
-    fi
+    # Set power profile to performance (via Omarchy's helper when present).
+    set_power_profile performance && log "Power profile set to performance"
 }
 
 restore_balanced_mode() {
@@ -2377,9 +2394,7 @@ restore_balanced_mode() {
 
     # Restore power profile — same rule as the governor above.
     if (( have_saved_state )) && command -v powerprofilesctl &>/dev/null; then
-        local target_pp="${saved_pp:-balanced}"
-        sudo -n powerprofilesctl set "$target_pp" 2>/dev/null || \
-            powerprofilesctl set "$target_pp" 2>/dev/null
+        set_power_profile "${saved_pp:-balanced}"
     fi
 
     rm -f "$SAVED_STATE_FILE"
@@ -2659,8 +2674,15 @@ if [[ -f "$SAVED_STATE_FILE" ]]; then
     echo "${PRE_GAMING_CPU_GOVERNOR:-powersave}" > "$gov" 2>/dev/null
   done
   if command -v powerprofilesctl &>/dev/null && [[ -n "${PRE_GAMING_POWER_PROFILE:-}" ]]; then
-    sudo -n powerprofilesctl set "$PRE_GAMING_POWER_PROFILE" 2>/dev/null || \
-      powerprofilesctl set "$PRE_GAMING_POWER_PROFILE" 2>/dev/null
+    # Prefer Omarchy's helper so the profile is recorded for the current power
+    # source and survives the next omarchy-powerprofiles-init autodetect.
+    if command -v omarchy-powerprofiles-set &>/dev/null; then
+      omarchy-powerprofiles-set autodetect "$PRE_GAMING_POWER_PROFILE" 2>/dev/null || \
+        powerprofilesctl set "$PRE_GAMING_POWER_PROFILE" 2>/dev/null
+    else
+      sudo -n powerprofilesctl set "$PRE_GAMING_POWER_PROFILE" 2>/dev/null || \
+        powerprofilesctl set "$PRE_GAMING_POWER_PROFILE" 2>/dev/null
+    fi
   fi
   rm -f "$SAVED_STATE_FILE"
 fi
