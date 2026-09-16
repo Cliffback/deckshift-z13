@@ -1,8 +1,19 @@
 # DeckShift
 
-**Version 0.2.2** — Steam Deck-style gaming mode for [Omarchy](https://omarchy.com). Press `Super+Shift+S` to enter Gaming Mode (Steam Big Picture in Gamescope), `Super+Shift+R` to return to your desktop — or drive the whole thing from the control panel in your bar (`Super+Alt+G`).
+**Version 0.2.2-z13** — Steam Deck-style gaming mode for [Omarchy](https://omarchy.com). Press the side button (Armory Crate / `XF86Launch3`) to toggle Gaming Mode (Steam Big Picture in Gamescope), or drive the whole thing from the control panel in your bar (`Super+Alt+G`).
 
 Lineage: forked from Super-Shift-S-Omarchy-Deck-Mode, briefly renamed Omarchy Deck, then renamed DeckShift.
+
+> **This is the Z13 fork** ([Cliffback/deckshift-z13](https://github.com/Cliffback/deckshift-z13)), tracking [28allday/deckshift](https://github.com/28allday/deckshift) `master` on the `z13` branch. It carries ASUS ROG Flow Z13 (2025) fixes on top of upstream:
+>
+> - **Side-button toggle** — `XF86Launch3` (Armory Crate) enters/exits Gaming Mode. `Super+Shift+S` is left to Fn+F6 (firmware screenshot key), and the evdev monitor watches `KEY_PROG3` only instead of `Super+Shift+R`.
+> - **Display seeds** — `OUTPUT_CONNECTOR=*,eDP-1` (prefer external when docked) and `STEAM_DISPLAY_REFRESH_LIMITS=60,180` (180 Hz panel), written only when absent so the control panel keeps ownership.
+> - **Gaming-session sentinel** — written in `switch-to-gaming` before the SDDM restart, closing the window before the wrapper starts.
+> - **Quattro NetworkManager cleanup** — removes stale `10-iwd-backend.conf` / `20-unmanaged-systemd.conf` when their backends are inactive; `gamescope-nm-stop` no longer stops NM or restarts iwd.
+> - **Consolidated pacman hook** — re-applies cap_sys_nice, the session entry, competing-session disables, `os-session-select`, and the Heroic patch after upgrades.
+> - **Power profiles via Omarchy** — applied through `omarchy-powerprofiles-set autodetect <profile>` so the per-AC/battery state file stays in sync and `omarchy-powerprofiles-init` no longer clobbers the restore.
+>
+> Sync from upstream: `git fetch upstream && git checkout master && git merge --ff-only upstream/master && git checkout z13 && git rebase master`.
 
 > **Target:** [Omarchy](https://omarchy.com) — Arch + Hyprland + SDDM. DeckShift depends on Omarchy-specific helpers (`omarchy-pkg-add`, `omarchy-install-gaming-steam`, etc.) and is not intended to be cross-distro. Omarchy 4 (Quickshell / Lua config) is the primary target; pre-4 installs are still handled via the legacy `.conf` fallbacks.
 
