@@ -1,6 +1,6 @@
 # DeckShift
 
-**Version 0.2.2-z13** — Steam Deck-style gaming mode for [Omarchy](https://omarchy.com). Press the side button (Armory Crate / `XF86Launch3`) to toggle Gaming Mode (Steam Big Picture in Gamescope), or drive the whole thing from the control panel in your bar (`Super+Alt+G`).
+**Version 0.2.2-z13.1** — Steam Deck-style gaming mode for [Omarchy](https://omarchy.com). Press the side button (Armory Crate / `XF86Launch3`) to toggle Gaming Mode (Steam Big Picture in Gamescope), or drive the whole thing from the control panel in your bar (`Super+Alt+G`).
 
 Lineage: forked from Super-Shift-S-Omarchy-Deck-Mode, briefly renamed Omarchy Deck, then renamed DeckShift.
 
@@ -12,6 +12,8 @@ Lineage: forked from Super-Shift-S-Omarchy-Deck-Mode, briefly renamed Omarchy De
 > - **Quattro NetworkManager cleanup** — removes stale `10-iwd-backend.conf` / `20-unmanaged-systemd.conf` when their backends are inactive; `gamescope-nm-stop` no longer stops NM or restarts iwd.
 > - **Consolidated pacman hook** — re-applies cap_sys_nice, the session entry, competing-session disables, `os-session-select`, and the Heroic patch after upgrades.
 > - **Power profiles via Omarchy** — applied through `omarchy-powerprofiles-set autodetect <profile>` so the per-AC/battery state file stays in sync and `omarchy-powerprofiles-init` no longer clobbers the restore.
+> - **Migration-safe session cleanup** — the old session-file cleanup no longer deletes package-owned `/usr/bin/steamos-*` / `jupiter-biosupdate`, and the client package is reinstalled in place (never removed first) with `--aur` forced. Fixes a migration that removed `gamescope-session-steam-git`, resolved the reinstall to the conflicting CachyOS repo provider, and left Gaming Mode launching gamescope with no Steam client.
+> - **`--verify` is sudo-aware** — probes `sudo -n` once and reports root-owned files as `SKIPPED` instead of a false 26-file `MISSING` list when credentials are not cached; also checks `sessions.d/steam` so a missing session client is caught.
 >
 > Sync from upstream: `git fetch upstream && git checkout master && git merge --ff-only upstream/master && git checkout z13 && git rebase master`.
 
@@ -20,6 +22,12 @@ Lineage: forked from Super-Shift-S-Omarchy-Deck-Mode, briefly renamed Omarchy De
 [![DeckShift demo](https://img.youtube.com/vi/nj4pLh3spCs/maxresdefault.jpg)](https://youtu.be/nj4pLh3spCs)
 
 ## What's New
+
+### v0.2.2-z13.1 — Migration no longer strands Gaming Mode without a Steam client
+
+Migrating an existing Z13 install could delete `gamescope-session-steam-git` and never put it back. The cleanup step removed `/usr/bin/steamos-*` and `/usr/bin/jupiter-biosupdate` as "old custom session files", but those are owned by that package — so the package looked corrupt, the installer queued it for remove-and-reinstall, and the reinstall resolved the bare name to the CachyOS repo's `gamescope-session-cachyos` (which `Provides`/`Conflicts` the same names). That transaction aborted on the conflict with the installed `gamescope-session-git`, leaving no `sessions.d/steam`. `gamescope-session-plus` only sets `CLIENTCMD` from that file, so Gaming Mode would start gamescope and then launch nothing.
+
+Three changes close it: the cleanup now skips any file owned by a pacman package (`pacman -Qo`), the client package is **reinstalled in place** rather than removed first, and the install forces `--aur` so the name can never resolve to the repo provider. `--verify` now checks `sessions.d/steam` directly, not just the package name, and prints the exact recovery command.
 
 ### v0.2.2 — Screen sharing fixed for real, session logs, an uninstaller
 
@@ -186,6 +194,8 @@ The correct NVIDIA driver branch is auto-selected via Omarchy's `omarchy-hw-nvid
 - `gamescope-session-git` — ChimeraOS base session framework
 - `gamescope-session-steam-git` — ChimeraOS Steam session with compatibility scripts
 - `proton-ge-custom-bin` (optional)
+
+> On CachyOS-enabled systems the `cachyos` repo also ships `gamescope-session-cachyos`, which `Provides`/`Conflicts` both of the above. Always install with `--aur` (`yay -S --aur gamescope-session-steam-git`) so the helper pins the AUR package instead of resolving the bare name to the repo provider and aborting on the conflict.
 
 **Other Requirements**
 - `python-evdev` — for the keyboard shortcut monitor
@@ -625,6 +635,7 @@ yay -Rns gamescope-session-git gamescope-session-steam-git
 
 ## Changelog
 
+- **v0.2.2-z13.1** — Z13 fork: migration-safe session cleanup. The old-file cleanup skips package-owned `/usr/bin/steamos-*` / `jupiter-biosupdate` (`pacman -Qo`), the client package is reinstalled in place instead of removed first, and the install forces `--aur` so `gamescope-session-steam-git` cannot resolve to the conflicting `cachyos/gamescope-session-cachyos`. `--verify` is sudo-aware (no false missing-file list without cached credentials) and checks `sessions.d/steam` so a missing Steam session client is caught.
 - **v0.2.2** — Screen sharing after a Gaming Mode round-trip actually fixed: `switch-to-desktop` writes the recovery marker before the teardown that used to kill it, and `deckshift-portal-recovery` restarts the portal frontend Steam poisons inside gamescope (no more pipewire bounce, and it self-triggers on the broken state). Exiting Gaming Mode no longer clobbers the CPU governor/power profile with a guess. New `./uninstall.sh` with `--dry-run`. Opt-in Gaming Mode session logs from the control panel (dated files under `~/.local/state/omarchy/nosignal.deckshift/`, 10 newest kept). NVIDIA DRM modeset is detected via Omarchy's modprobe/sysfs (not only `/proc/cmdline`) and enabled with the same `nvidia.conf` drop-ins + initramfs rebuild, any bootloader. `--verify` reads `/etc/group` for `video`/`input`/`wheel` so group checks pass without logging out.
 - **v0.2.1** — Fix fresh installs failing with "target not found": dropped `lib32-openal`, `lib32-sdl2-compat` and `lib32-libvdpau` (removed from Arch multilib); installer now skips repo-dropped packages instead of aborting.
 - **v0.2.0** — Native Omarchy 4 control panel (bar icon + panel, `Super+Alt+G`) replaces the gum settings TUI; saved settings now actually reach the running session (`set-environment` fix); Launch Gaming Mode from the panel behind a confirm.
