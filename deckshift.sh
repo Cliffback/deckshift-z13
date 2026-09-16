@@ -39,7 +39,7 @@ set -Euo pipefail
 # -u: Treat unset variables as errors (catches typos in variable names)
 # -o pipefail: A pipeline fails if ANY command in it fails, not just the last one
 
-DECKSHIFT_VERSION="0.2.2-z13.1"
+DECKSHIFT_VERSION="0.2.2-z13.2"
 
 # Plugin id for the omarchy-shell control panel. Must match the "id" in
 # plugins/<id>/manifest.json — the shell keys everything (shell.json entries,
@@ -1110,22 +1110,16 @@ SHADERCACHE
 
 # Silences a harmless but annoying warning from fcitx5 (input method framework).
 # fcitx5 complains about Wayland support on every login, even if you don't use
-# it for input. This sets FCITX_NO_WAYLAND_DIAGNOSE=1 to suppress the warning
-# in both Hyprland config and the user's environment.
+# it for input. This sets FCITX_NO_WAYLAND_DIAGNOSE=1 in the user's environment.
+#
+# Omarchy 4 note: the env is set through ~/.config/environment.d, which systemd
+# (uwsm) imports into the session and therefore reaches Hyprland and every child
+# process. The old `env = FCITX_NO_WAYLAND_DIAGNOSE,1` append to hyprland.conf
+# is gone: the Lua config provider does not read that file, and writing it left
+# a line that looked effective but was ignored.
 setup_fcitx_silence() {
   local env_dir="$HOME/.config/environment.d"
   local env_file="$env_dir/90-fcitx-wayland.conf"
-  local hypr_conf="$HOME/.config/hypr/hyprland.conf"
-
-  if [[ -f "$hypr_conf" ]]; then
-    if ! grep -q "FCITX_NO_WAYLAND_DIAGNOSE" "$hypr_conf" 2>/dev/null; then
-      echo "" >> "$hypr_conf"
-      echo "# Silence fcitx5 Wayland diagnose warning (gaming-mode installer)" >> "$hypr_conf"
-      echo "env = FCITX_NO_WAYLAND_DIAGNOSE,1" >> "$hypr_conf"
-      info "Added FCITX_NO_WAYLAND_DIAGNOSE to Hyprland config"
-      NEEDS_RELOGIN=1
-    fi
-  fi
 
   if [[ ! -f "$env_file" ]] || ! grep -q "FCITX_NO_WAYLAND_DIAGNOSE=1" "$env_file" 2>/dev/null; then
     mkdir -p "$env_dir" || return 0
