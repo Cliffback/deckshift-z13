@@ -39,7 +39,7 @@ set -Euo pipefail
 # -u: Treat unset variables as errors (catches typos in variable names)
 # -o pipefail: A pipeline fails if ANY command in it fails, not just the last one
 
-DECKSHIFT_VERSION="0.2.2-z13"
+DECKSHIFT_VERSION="0.2.2-z13.1"
 
 # Plugin id for the omarchy-shell control panel. Must match the "id" in
 # plugins/<id>/manifest.json — the shell keys everything (shell.json entries,
@@ -125,6 +125,14 @@ validate_environment() {
 # Quick check if a pacman package is installed. Used throughout the script
 # to avoid reinstalling things that are already present.
 check_package() { pacman -Qi "$1" &>/dev/null; }
+
+# True if a path is owned by an installed pacman package. Used to avoid
+# deleting files that belong to a package (see the old_files cleanup below):
+# removing a package-owned file makes the package look corrupt, which then
+# triggers a remove/reinstall cycle that can resolve to the wrong provider.
+file_is_pkg_owned() {
+  pacman -Qo "$1" &>/dev/null
+}
 
 # Group membership: `id -nG USER` reads /etc/group, so it is correct right
 # after usermod. Bare `id -nG` / `groups` is this login session and stays
@@ -1744,12 +1752,23 @@ setup_session_switching() {
     "/usr/bin/steamos-session-select"
   )
 
+  # Z13: only delete files DeckShift's own (pre-package) installer created.
+  # /usr/bin/steamos-* and /usr/bin/jupiter-biosupdate are owned by
+  # gamescope-session-steam-git; deleting them makes that package look
+  # corrupt, which then triggers the remove/reinstall cycle below. On a
+  # migration that cycle removed the package and the AUR reinstall resolved
+  # to the conflicting repo provider gamescope-session-cachyos and aborted,
+  # leaving Gaming Mode with no sessions.d/steam (so gamescope-session-plus
+  # never sets CLIENTCMD and Steam never launches). Skip package-owned files.
   local cleaned=false
   for old_file in "${old_files[@]}"; do
-    if [[ -f "$old_file" ]]; then
-      info "Removing old file: $old_file"
-      sudo rm -f "$old_file" && cleaned=true
+    [[ -f "$old_file" ]] || continue
+    if file_is_pkg_owned "$old_file"; then
+      info "Keeping package-owned file: $old_file"
+      continue
     fi
+    info "Removing old file: $old_file"
+    sudo rm -f "$old_file" && cleaned=true
   done
 
   if $cleaned; then
@@ -1782,6 +1801,13 @@ setup_session_switching() {
     fi
   done
 
+  # Z13: a reinstall must NOT remove the package first. The old flow did
+  # `pacman -Rns` then reinstall, so any failure (wrong provider, offline,
+  # AUR hiccup) left Gaming Mode with no session client at all. Reinstalling
+  # in place is atomic from the user's point of view: either the files come
+  # back or the existing install is untouched.
+  local -a reinstall_packages=()
+
   if ! check_package "gamescope-session-steam-git"; then
     if check_package "gamescope-session-steam"; then
       warn "gamescope-session-steam (non-git) is installed but missing Steam compatibility scripts"
@@ -1792,22 +1818,29 @@ setup_session_switching() {
     aur_packages+=("gamescope-session-steam-git")
   elif $steam_scripts_missing; then
     warn "gamescope-session-steam-git is installed but Steam compatibility scripts are missing!"
-    info "Will reinstall package to restore missing files:"
+    info "Will reinstall package in place to restore missing files:"
     for script in "${required_steam_scripts[@]}"; do
       if [[ ! -f "$script" ]]; then
         info "  - Missing: $script"
       fi
     done
-    packages_to_remove+=("gamescope-session-steam-git")
-    aur_packages+=("gamescope-session-steam-git")
+    reinstall_packages+=("gamescope-session-steam-git")
   fi
 
-  if ((${#aur_packages[@]})); then
+  if ((${#aur_packages[@]})) || ((${#reinstall_packages[@]})); then
     echo ""
-    echo "  The following AUR packages are required for ChimeraOS session:"
-    for pkg in "${aur_packages[@]}"; do
-      echo "    - $pkg"
-    done
+    if ((${#aur_packages[@]})); then
+      echo "  The following AUR packages are required for ChimeraOS session:"
+      for pkg in "${aur_packages[@]}"; do
+        echo "    - $pkg"
+      done
+    fi
+    if ((${#reinstall_packages[@]})); then
+      echo "  The following packages will be reinstalled in place:"
+      for pkg in "${reinstall_packages[@]}"; do
+        echo "    - $pkg"
+      done
+    fi
     if ((${#packages_to_remove[@]})); then
       echo ""
       echo "  The following packages need to be replaced:"
@@ -1835,18 +1868,42 @@ setup_session_switching() {
           }
         fi
 
-        info "Installing ChimeraOS gamescope-session packages..."
-        $aur_helper -S --needed --noconfirm --answeredit None --answerclean None --answerdiff None "${aur_packages[@]}" || {
-          err "Failed to install gamescope-session packages"
-          warn "You may need to install them manually: $aur_helper -S ${aur_packages[*]}"
-        }
+        # Z13: --aur is mandatory here. The CachyOS repo ships
+        # gamescope-session-cachyos, which Provides (and Conflicts with)
+        # gamescope-session-steam-git. Without --aur the helper resolves the
+        # bare name to that repo package; the transaction then aborts on the
+        # conflict with the installed gamescope-session-git, and the package
+        # we just removed is never restored. Forcing AUR pins the real
+        # ChimeraOS package.
+        local -a install_targets=("${aur_packages[@]}" "${reinstall_packages[@]}")
+        if ((${#install_targets[@]})); then
+          info "Installing ChimeraOS gamescope-session packages (AUR)..."
+          $aur_helper -S --aur --needed --noconfirm --answeredit None --answerclean None --answerdiff None "${install_targets[@]}" || {
+            err "Failed to install gamescope-session packages"
+            warn "You may need to install them manually: $aur_helper -S --aur ${install_targets[*]}"
+          }
+        fi
+
+        # Gaming Mode boots gamescope without a client when sessions.d/steam
+        # is absent (gamescope-session-plus then never sets CLIENTCMD). Verify
+        # the client package is actually present and tell the user exactly how
+        # to recover instead of leaving a silently broken session.
+        local missing_after=()
+        for pkg in "${aur_packages[@]}" "${reinstall_packages[@]}"; do
+          check_package "$pkg" || missing_after+=("$pkg")
+        done
+        if ((${#missing_after[@]})); then
+          warn "These packages are still missing: ${missing_after[*]}"
+          warn "Gaming Mode will not launch Steam until they are installed."
+          warn "Recover with: $aur_helper -S --aur ${missing_after[*]}"
+        fi
       fi
     else
       warn "No AUR helper found (yay/paru). Please install manually:"
       if ((${#packages_to_remove[@]})); then
         echo "    sudo pacman -Rns ${packages_to_remove[*]}"
       fi
-      echo "    yay -S ${aur_packages[*]}"
+      echo "    yay -S --aur ${aur_packages[*]} ${reinstall_packages[*]}"
       echo ""
       read -p "Press Enter to continue after installing, or Ctrl+C to abort..."
     fi
@@ -3587,6 +3644,25 @@ verify_installation() {
     echo "  ✓ gamescope-session-steam installed"
   else
     echo "  ✗ gamescope-session-steam NOT installed"
+    all_ok=false
+  fi
+  # The package name is not enough: the client definition is what actually
+  # launches Steam. gamescope-session-plus only sets CLIENTCMD from a
+  # sessions.d/<client> file, so if that file is missing Gaming Mode starts
+  # gamescope and then runs nothing. Covers both the AUR package
+  # (/usr/share) and a user override (~/.config).
+  local session_client=""
+  for c in /usr/share/gamescope-session-plus/sessions.d/steam \
+           /etc/gamescope-session-plus/sessions.d/steam \
+           "${XDG_CONFIG_HOME:-$HOME/.config}/gamescope-session-plus/sessions.d/steam"; do
+    [[ -f "$c" ]] && session_client="$c" && break
+  done
+  if [[ -n "$session_client" ]]; then
+    echo "  ✓ Steam session client present ($session_client)"
+  else
+    echo "  ✗ Steam session client MISSING (sessions.d/steam)"
+    echo "    → Gaming Mode will start gamescope but never launch Steam"
+    echo "    → Reinstall: yay -S --aur gamescope-session-steam-git"
     all_ok=false
   fi
 
