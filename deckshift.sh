@@ -2127,6 +2127,21 @@ UDISKS_POLKIT
   set_conf_key FCITX_NO_WAYLAND_DIAGNOSE 1
   set_conf_key SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS 0
 
+  # Z13 seeds — only written when the key is absent, so the control panel stays
+  # the owner of these once the user has touched them.
+  #
+  #   OUTPUT_CONNECTOR=*,eDP-1 — prefer an external display when docked, fall
+  #     back to the internal panel. Without this, gamescope ignores external
+  #     displays entirely.
+  #   STEAM_DISPLAY_REFRESH_LIMITS=60,180 — the Z13 panel is 180 Hz; tells the
+  #     Steam UI which range to offer. The panel does not manage this key.
+  if ! grep -qE '^OUTPUT_CONNECTOR=' "$gamescope_conf"; then
+    set_conf_key OUTPUT_CONNECTOR '*,eDP-1'
+  fi
+  if ! grep -qE '^STEAM_DISPLAY_REFRESH_LIMITS=' "$gamescope_conf"; then
+    set_conf_key STEAM_DISPLAY_REFRESH_LIMITS '60,180'
+  fi
+
   # GPU-specific keys — set the right ones, clear stale ones from a prior
   # install on a different GPU (e.g. user swapped NVIDIA → AMD).
   case "$dgpu_type" in
