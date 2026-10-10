@@ -2888,6 +2888,22 @@ rm -f /tmp/.gaming-session-active
 # saw no marker and no-oped on every single return.
 touch /tmp/.deckshift-just-returned 2>/dev/null || true
 
+# Stable AC/battery detection: UPower.onBattery flaps while charging on this
+# machine, so omarchy-powerprofiles-set autodetect's single read can file the
+# restored profile under the wrong source. Sample briefly and treat any observed
+# on-AC as decisive (on real battery the flag is true for the whole window).
+detect_power_source() {
+  local i
+  for (( i = 0; i < 8; i++ )); do
+    if ! busctl get-property org.freedesktop.UPower /org/freedesktop/UPower \
+            org.freedesktop.UPower OnBattery 2>/dev/null | grep -q "true"; then
+      echo ac; return 0
+    fi
+    sleep 0.15
+  done
+  echo battery
+}
+
 # SYNCHRONOUS POWER RESTORE — done first because the trap-based restore in
 # gamescope-session-nm-wrapper can be SIGKILL'd by `systemctl restart sddm`
 # before it completes, leaving CPU governor / power profile stuck at
@@ -2902,9 +2918,11 @@ if [[ -f "$SAVED_STATE_FILE" ]]; then
   done
   if command -v powerprofilesctl &>/dev/null && [[ -n "${PRE_GAMING_POWER_PROFILE:-}" ]]; then
     # Prefer Omarchy's helper so the profile is recorded for the current power
-    # source and survives the next omarchy-powerprofiles-init autodetect.
+    # source and survives the next omarchy-powerprofiles-init autodetect. The
+    # source is resolved with detect_power_source so a charging flap cannot file
+    # it under the wrong key.
     if command -v omarchy-powerprofiles-set &>/dev/null; then
-      omarchy-powerprofiles-set autodetect "$PRE_GAMING_POWER_PROFILE" 2>/dev/null || \
+      omarchy-powerprofiles-set "$(detect_power_source)" "$PRE_GAMING_POWER_PROFILE" 2>/dev/null || \
         powerprofilesctl set "$PRE_GAMING_POWER_PROFILE" 2>/dev/null
     else
       sudo -n powerprofilesctl set "$PRE_GAMING_POWER_PROFILE" 2>/dev/null || \
