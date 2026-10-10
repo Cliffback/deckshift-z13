@@ -2473,6 +2473,34 @@ deckshift_begin_session_log() {
 
 deckshift_begin_session_log
 
+# Determine the AC/battery source to key the profile on.
+#
+# Omarchy's `omarchy-powerprofiles-set autodetect` reads UPower.onBattery once.
+# On this machine the EC flaps AC0.online while charging, and UPower.onBattery
+# flaps with it, so a single read can report "battery" while the machine is
+# actually on AC. Filing the gaming profile under the battery key then corrupts
+# the per-source profile that `omarchy-powerprofiles-init` restores later (seen:
+# entering Gaming Mode during a charge flap wrote battery=performance, after
+# which unplugging was a no-op because the "battery" profile already was
+# performance).
+#
+# Sample briefly and treat any observed "on AC" as decisive: on genuine battery
+# the flag is true for the whole window, so bias-to-AC never misreads a real
+# unplug. Defaults to "ac" when UPower is unavailable, matching
+# omarchy-powerprofiles-set's own fallback.
+detect_power_source() {
+    local i
+    for (( i = 0; i < 8; i++ )); do
+        if ! busctl get-property org.freedesktop.UPower /org/freedesktop/UPower \
+                org.freedesktop.UPower OnBattery 2>/dev/null | grep -q "true"; then
+            echo ac
+            return 0
+        fi
+        sleep 0.15
+    done
+    echo battery
+}
+
 # Set the power profile through Omarchy's helper when it is available.
 #
 # Omarchy's `omarchy-powerprofiles-init` runs on every Hyprland start and calls
@@ -2480,13 +2508,17 @@ deckshift_begin_session_log
 # file. Writing the profile with plain `powerprofilesctl set` leaves that state
 # file stale, so the next desktop session clobbers the restore (the documented
 # "profile stays on performance after Gaming Mode exit" caveat). Going through
-# `omarchy-powerprofiles-set autodetect <profile>` sets the profile AND records
-# it for the current power source, so the restore sticks.
+# `omarchy-powerprofiles-set <source> <profile>` sets the profile AND records it
+# for the current power source, so the restore sticks. The source is resolved by
+# detect_power_source rather than autodetect, so a charging flap cannot file the
+# profile under the wrong key.
 set_power_profile() {
     local profile="$1"
     [[ -n "$profile" ]] || return 0
     if command -v omarchy-powerprofiles-set &>/dev/null; then
-        omarchy-powerprofiles-set autodetect "$profile" 2>/dev/null && return 0
+        local source
+        source=$(detect_power_source)
+        omarchy-powerprofiles-set "$source" "$profile" 2>/dev/null && return 0
     fi
     if command -v powerprofilesctl &>/dev/null; then
         sudo -n powerprofilesctl set "$profile" 2>/dev/null || \
