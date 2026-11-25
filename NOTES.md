@@ -2,11 +2,146 @@
 
 Working notes for future development sessions. User-facing docs live in README.md.
 
-## Current state (2026-09-12) — PARKED; v0.2.2 on master UNTAGGED
+## 2026-10-31 — v0.2.3 tagged (includes everything planned for v0.2.2)
 
-Parked 2026-08-28 pending the maintainer's hardware pass: full fresh
-install, Gaming Mode round-trip, uninstall test. Tag v0.2.2 once that
-comes back clean (gate details below).
+Hardware tested on NVIDIA: install over an older build, Gaming Mode round trip,
+settings restored, new sudoers rules in real use. NOT hardware tested before the
+tag, at the maintainer's call: `./uninstall.sh` and an install from nothing.
+Also not exercised: `omarchy update` with updates pending, and replacing old
+sudoers rules under real sudo (sandbox only). If reports come in, look there first.
+
+v0.2.2 was never tagged. Master carried that number from August, without the
+sudoers fix, so the new number tells those installs apart.
+
+Still open: #8 (does the stale Steam UI still happen with the #12 fix? if not,
+close as superseded), #4 (reporters asked to retest), #9 (candidate to close).
+
+## 2026-10-31 — PR #13 (lo3w3n): sudoers, update guard, VT8, panel key
+
+Finished on top of the contributor's branch. Kept: pinned sudoers rules, `omarchy
+update`, VT8, panel key. Dropped: moving `Super+Shift+S` and `Super+Shift+R`,
+which are deliberate. Added: replacing older sudoers rules on a re-run, moving an
+existing panel bind, docs.
+
+- `/etc/sudoers.d` is 0750 root, so `-f` from a normal user is ALWAYS false. Any
+  check on a file in there has to go through `sudo test -f`. The session sudoers
+  check (`gaming-session-switch`) still has the same blind `-f`; it's harmless
+  there because the file is rewritten either way.
+- A `*` in sudoers matches across arguments. `sudo -l <cmd>` can't test that for a
+  wheel user, because the wheel rule matches everything. Use `sudo -n -k` with a
+  harmless help command, plus a control that must be refused.
+- `bash -n` can't see code that has landed inside a heredoc. The PipeWire config
+  in `setup_performance_permissions` has a bare `}` line, so don't look for the
+  end of that function by searching for one.
+
+Hardware test before merge, on NVIDIA: run the installer, enter and leave Gaming
+Mode, then `sudo -n -k powerprofilesctl set --help extra` must be refused while
+`sudo -n -k powerprofilesctl set balanced` works.
+
+## 2026-10-16 night — #12 LIVE TEST PASSED (maintainer: "tested and seems correct"); test files REMOVED
+
+- launch.log: `/usr/bin/gamescope --force-composition -W 2560 -H 1440 --nested-refresh 60
+  --prefer-output HDMI-A-2 … --prefer-vk-device 10de:2d04` (RTX 5060 Ti), session
+  21:22–22:05, looked right to the maintainer. sessions.d/steam + ~/.local/state/deckshift-12-test
+  deleted (sessions.d empty again, as before).
+- Same journal shows the OLD July install's bugs that master already fixes:
+  cleanup ran twice and the second pass restored powersave/balanced over the
+  saved performance/performance state; "Keybind monitor NOT started".
+- ⏭️ commit the fix (ASK) → full test day with the installer from the branch
+  (v0.2.2 pass + #12) → v0.2.3 → reply #12, ask #4 reporters, recheck #8.
+
+## 2026-10-16 — #12 fix written (UNCOMMITTED, branch fix-12-gamescope-bin); live test SET UP, maintainer tests later
+
+- ⚠️ The DeckShift installed on the desktop is the **17 July** build (pre-v0.2.0):
+  the 10-10 hardware pass never happened, v0.2.2 still untagged and never run here.
+- Fix (deckshift.sh, session wrapper heredoc): NVIDIA + wrapper executable →
+  `export GAMESCOPE_BIN=/usr/local/lib/gamescope-nvidia/gamescope` (replaces the
+  useless PATH prepend) + a log line. User's sessions.d/steam is sourced later,
+  so their own GAMESCOPE_BIN still wins. bash -n + shellcheck clean; dry run
+  through the real get_gamescope_binary → `/usr/bin/gamescope --force-composition …`
+  (without the fix: plain /usr/bin/gamescope). Wrapper passes the session's
+  `--help` option probes through.
+- Live test (option 1, no sudo): `~/.config/gamescope-session-plus/sessions.d/steam`
+  sets GAMESCOPE_BIN to a logging shim `~/.local/state/deckshift-12-test/gamescope`
+  → execs the NVIDIA wrapper. Each real launch appends the full command line to
+  `~/.local/state/deckshift-12-test/launch.log`. ⏭️ Maintainer: Gaming Mode → look at the
+  Steam UI + a game's FPS → back out; then check launch.log shows
+  --force-composition. **UNDO after:** delete that sessions.d/steam file and
+  the deckshift-12-test dir (sessions.d was empty before).
+- Then: good → commit fix, full test day (installer from branch = v0.2.2 pass +
+  #12), ship as v0.2.3, reply on #12 + ask #4 reporters / recheck #8. Bad
+  (perf/visual) → rethink before any release.
+
+## Current state (2026-10-09 night) — PARKED; v0.2.2 on master UNTAGGED
+
+Parked for a full hands-on test day with the maintainer (planned 2026-10-10).
+Master includes PR #11. Order:
+
+1. **Hardware pass** (still outstanding since 2026-08-28): fresh install, Gaming
+   Mode round-trip, uninstall. Clean → tag + push v0.2.2 (gate details below).
+2. **#12 fix** — export `GAMESCOPE_BIN` to the NVIDIA wrapper. Test on NVIDIA:
+   session log must show `/usr/local/lib/gamescope-nvidia/gamescope` and
+   `--force-composition`; compare the Steam UI, check performance; ship as
+   v0.2.3, not inside v0.2.2.
+3. **#8** — with #12 applied, does the stale Steam UI still happen? If not,
+   close #8 as superseded (thank Kuthumy); if yes, back to the opt-in ask.
+4. **#4** — after #12 ships, ask the reporters to retest.
+5. **#9** — no reply since changes requested 09-27; candidate to close like
+   #10 (eGPU not a target, reopen if that changes).
+
+Push to the `github` remote only (forgejo retired).
+
+## 2026-10-09 — PR #11 merged (Qt 6.12 Color shadowing); issue #12 confirmed
+
+**PR #11** (bomouridsen) — MERGED @ `ecd250e`. Qt 6.12 exports a `Color`
+singleton from QtQuick that shadows `qs.Commons.Color` for bare `Color.` lookups
+→ undefined → black icon, unthemed panel. Panel now imports
+`qs.Commons as Commons` and qualifies the tokens; the bar icon drops its
+explicit `Color.accent` and takes WidgetButton's default (bar foreground), so
+**the icon is no longer accent-coloured** — accepted as-is. Any new QML must use
+`Commons.Color`, never bare `Color`.
+
+Tested after merge (6.12 not in Arch repos yet, box on 6.11.2): a Quickshell
+harness in headless cage with symlinked `Commons`/`Ui`, loading the plugin's
+BarWidget + Panel, plus a stand-in `Color` singleton imported last to simulate
+the collision. Pre-merge + stand-in reproduced the reporter's exact warnings;
+merged + stand-in kept every token. No change on 6.11 except the icon colour.
+The panel itself is a layer-shell `PanelWindow`, which cage can't show, so the
+panel colours were checked by property probe, not by pixels.
+
+**Issue #12** (same reporter) — CONFIRMED, open. `gamescope-session-plus`
+picks the binary from `$GAMESCOPE_BIN` (falls back to `/usr/bin/gamescope`) and
+never consults `PATH`, so the `/usr/local/lib/gamescope-nvidia` wrapper that
+`gamescope-session-nm-wrapper` prepends to `PATH` has **never run since v0.1.0**
+— `--force-composition` has never reached gamescope on NVIDIA. Fix is
+`export GAMESCOPE_BIN=…/gamescope-nvidia/gamescope` in the NVIDIA branch, but
+that turns force-composition on for every NVIDIA user for the first time
+(behaviour + perf change) — own release, own test. May explain #4 and #8.
+
+## 2026-09-27 — PR #9 changes requested, PR #10 declined
+
+**PR #9** (ishcabittle, skip mkinitcpio nvidia early-load for TB/USB4 eGPUs) —
+CHANGES REQUESTED. `nvidia_is_thunderbolt_egpu()` tested against mocked sysfs:
+- vendor-allowlist heuristic flags INTERNAL GPUs behind PLX (`10b5`) or
+  ASMedia (`1b21`) switches as eGPUs; ASMedia is also the dock's bridge vendor,
+  so an allowlist can't separate them.
+- misses Intel-chip TB docks (bridges are `8086`/`0x060400`; `0x088000` is the
+  host NHI — a sibling, never an ancestor of the GPU).
+- the "remove legacy line" migration is unreachable: `check_nvidia_kernel_params`
+  returns early when `nvidia_modeset_is_enabled` (modprobe.d line already there).
+- eGPU branch still rebuilds initramfs but prints "left unchanged".
+Suggested a kernel-provided signal (`removable` attr / thunderbolt ancestry) —
+untested here, no TB on this box. Real impact if merged was low (Omarchy boxes
+already have modeset on, so the code never runs there).
+
+**PR #10** (same author, move NVIDIA env vars from
+`/etc/environment.d/90-nvidia-gamescope.conf` into
+`/etc/gamescope-session-plus/sessions.d/steam` guarded on `/dev/nvidia0`) —
+DECLINED + closed. Technically sound (gamescope-session-plus sources USR → ETC →
+LOCAL sessions.d files additively, then /etc/environment.d, so no regression),
+but it only matters when no NVIDIA card is present at boot (unplugged eGPU).
+Maintainer call: current path works, eGPU unsupported — revisit alongside #9 if
+eGPU support ever becomes a target. Gave the author a per-user workaround.
 
 ## 2026-09-12 — PR #8 reviewed (NVIDIA stale Steam UI); MangoHud finding
 

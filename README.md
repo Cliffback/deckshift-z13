@@ -1,6 +1,6 @@
 # DeckShift
 
-**Version 0.2.2-z13.2** — Steam Deck-style gaming mode for [Omarchy](https://omarchy.com). Press the side button (Armory Crate / `XF86Launch3`) to toggle Gaming Mode (Steam Big Picture in Gamescope), or drive the whole thing from the control panel in your bar (`Super+Alt+G`).
+**Version 0.2.3-z13.1** — Steam Deck-style gaming mode for [Omarchy](https://omarchy.com). Press the side button (Armory Crate / `XF86Launch3`) to toggle Gaming Mode (Steam Big Picture in Gamescope), or drive the whole thing from the control panel in your bar (`Super+Shift+Alt+D`).
 
 Lineage: forked from Super-Shift-S-Omarchy-Deck-Mode, briefly renamed Omarchy Deck, then renamed DeckShift.
 
@@ -24,6 +24,30 @@ Lineage: forked from Super-Shift-S-Omarchy-Deck-Mode, briefly renamed Omarchy De
 
 ## What's New
 
+### v0.2.3-z13.1 — Upstream v0.2.3 security fix merged
+
+Merges upstream v0.2.3: the passwordless performance rules are pinned to the exact commands Gaming Mode runs, so re-run `./deckshift.sh` to replace the old ones. The panel key moves to `Super+Shift+Alt+D`, session switches use VT8, and the installer runs `omarchy update` instead of `pacman -Syu`. The Z13 choices are unchanged: the side button (`XF86Launch3`) toggles Gaming Mode, `Super+Shift+S` stays with Fn+F6 (screenshot), and the power profile is still set through `omarchy-powerprofiles-set`, which needs no sudo rule. Upstream's notes below mention `Super+Shift+S`/`Super+Shift+R`; on this fork, use the side button.
+
+### v0.2.3 — Security fix: please re-run the installer
+
+**If you already have DeckShift, update it.** Updating isn't automatic, and your install keeps the old rules until you do this:
+
+```bash
+cd deckshift
+git pull
+./deckshift.sh
+```
+
+The passwordless rules for the Gaming Mode performance controls were too loose. They ended in a `*`, which also matches extra arguments, so a program running as you could use them to get root without your password. The new rules allow only the exact commands Gaming Mode runs, and re-running the installer replaces the old ones, whichever way you answer the prompt. Thanks to lo3w3n, who found this.
+
+Also in this release:
+
+- **The control panel key is now `Super+Shift+Alt+D`.** `Super+Alt+G` was also Omarchy's "Move window out of group", so pressing it did both. Re-running the installer moves your existing bind, and leaves it alone if you chose a different key yourself. `Super+Shift+S` and `Super+Shift+R` haven't changed.
+- **The installer no longer stops at the system update on Omarchy.** Omarchy blocks a direct `pacman -Syu`, so the installer now runs `omarchy update`. If that offers a reboot, run `./deckshift.sh` again afterwards.
+- **No more `tty2` login prompt flashing** when you switch into Gaming Mode.
+- **NVIDIA:** Gaming Mode now runs gamescope through DeckShift's NVIDIA wrapper, as it was meant to.
+- **The panel works on Qt 6.12.** A new Qt colour type left the bar icon black and the panel unthemed. The bar icon now uses the bar's colour instead of the accent colour.
+
 ### v0.2.2-z13.2 — Stop writing the dead pre-Quattro hyprland.conf
 
 `setup_fcitx_silence` appended `env = FCITX_NO_WAYLAND_DIAGNOSE,1` to `~/.config/hypr/hyprland.conf`. Omarchy 4's Lua config provider does not read that file, so the line did nothing while looking effective. The env is already set through `~/.config/environment.d/90-fcitx-wayland.conf` (imported into the session by uwsm, so it reaches Hyprland and every child process), which is now the only mechanism. The legacy `.conf` write is gone; the Lua-first/`.conf`-fallback pattern used for keybinds and autostart is unchanged.
@@ -37,6 +61,8 @@ Three changes close it: the cleanup now skips any file owned by a pacman package
 The installer also cleans up the retired Z13 stack it superseded: the old `/etc/pacman.d/hooks/gaming-mode.hook` (which targeted the same packages and could revert DeckShift's `os-session-select` on every upgrade), `gaming-mode-post-update`, `gaming-session-switch.pre-hotfix`, and the stale `~/.config/hypr/gaming-mode.conf` keybind. `uninstall.sh` removes them too.
 
 ### v0.2.2 — Screen sharing fixed for real, session logs, an uninstaller
+
+This version was never tagged on its own. All of it ships in v0.2.3.
 
 Screen sharing in Chromium/Firefox broke after every Gaming Mode round-trip, and the recovery helper that was supposed to prevent it turned out to have never once run — `switch-to-desktop` wrote its trigger marker two lines after the command that kills the script's own session. The marker now lands before the teardown, and the helper itself was rewritten to fix what actually breaks (Steam activates a portal frontend inside gamescope with an empty environment, and it squats there when the desktop returns): it restarts that frontend so the Hyprland backend comes back on its own, and no longer bounces pipewire — which was disconnecting all your audio for nothing. It also detects the broken state directly, so it can never again be silently disabled by a lost marker. On top of that, exiting Gaming Mode no longer overwrites your CPU governor and power profile with a `powersave`/`balanced` guess. (Thanks to a heroic bit of diagnosis by Filip Špaldoň.)
 
@@ -59,7 +85,7 @@ The gum-based `deckshift-settings` TUI is gone, replaced by **`nosignal.deckshif
 - **Live capability data.** Picking a monitor re-derives the resolution and refresh lists from that monitor's mode list on the spot. A connector saved earlier but not currently plugged in is labelled `not connected` rather than silently offering nothing.
 - **Fixed: saved settings never reached the running session.** Both the TUI and the panel write `~/.config/environment.d/gamescope-session-plus.conf`, then nudge systemd so the change applies without a re-login. The TUI called `systemctl --user import-environment KEY`, which copies a variable *from the calling process's environment* — i.e. the value read at login, the one just replaced. It propagated nothing. The panel calls `set-environment KEY=VALUE` instead, which actually pushes the new value.
 - Keys not managed by DeckShift (`ADAPTIVE_SYNC`, `HDR_ENABLED`, anything hand-added) are preserved across saves, as before.
-- Re-running `./deckshift.sh` installs the plugin, wires it into `shell.json` (both `plugins[]` and the bar), adds a `Super+Alt+G` toggle keybind, and removes the old TUI and its app-menu entry. Already-running shells need `omarchy-restart-shell` to pick the panel up.
+- Re-running `./deckshift.sh` installs the plugin, wires it into `shell.json` (both `plugins[]` and the bar), adds a `Super+Shift+Alt+D` toggle keybind, and removes the old TUI and its app-menu entry. Already-running shells need `omarchy-restart-shell` to pick the panel up.
 - `--verify` gained a control-panel section: plugin files present, registered in `plugins[]` (a plugin on disk but missing there loads its bar icon and then no-ops on every summon), bar icon, and keybind.
 
 **Requires Omarchy 4** for the panel — the installer skips it with a warning on older builds, where Gaming Mode itself still works via the keybinds.
@@ -68,7 +94,7 @@ Older releases are summarised in the [Changelog](#changelog).
 
 ## Control panel
 
-After install, open the panel from the **game-controller icon in your bar**, press `Super+Alt+G`, or run `omarchy-shell shell toggle nosignal.deckshift`. It changes Gaming Mode display settings without editing config files:
+After install, open the panel from the **game-controller icon in your bar**, press `Super+Shift+Alt+D`, or run `omarchy-shell shell toggle nosignal.deckshift`. It changes Gaming Mode display settings without editing config files:
 
 | Option | What it sets in `gamescope-session-plus.conf` |
 |---|---|
@@ -124,7 +150,7 @@ chmod +x deckshift.sh
 
 The installer is fully interactive and walks you through each step.
 
-After install, open the control panel (bar icon or `Super+Alt+G`) and pick:
+After install, open the control panel (bar icon or `Super+Shift+Alt+D`) and pick:
 
 - A monitor
 - A resolution / refresh rate
@@ -141,7 +167,7 @@ Press **Save**, then **Launch Gaming Mode** (or `Super+Shift+S`). Turn on **Capt
 | Enter Gaming Mode | `Super + Shift + S` |
 | Return to Desktop | `Super + Shift + R` *(global keybind monitor catches it inside Gamescope)* |
 | Return to Desktop (alternative) | Steam → Power → **Switch to Desktop** |
-| Open control panel | Bar icon, `Super + Alt + G`, or `omarchy-shell shell toggle nosignal.deckshift` |
+| Open control panel | Bar icon, `Super + Shift + Alt + D`, or `omarchy-shell shell toggle nosignal.deckshift` |
 | Launch Gaming Mode from panel | **Launch Gaming Mode** button (confirms first) |
 | Capture a session log | Panel **Capture session** toggle, then launch. Logs land in `~/.local/state/omarchy/nosignal.deckshift/` (10 newest kept) |
 | Open session logs | **View** in the panel (terminal `cat` of the newest session log) |
@@ -624,7 +650,7 @@ sudo rm -f /usr/share/applications/deckshift-settings.desktop
 # Strip the Hyprland keybind + portal-recovery autostart lines
 # Omarchy 4 (Lua config):
 sed -i '/switch-to-gaming/d; /SUPER + SHIFT + S/d' ~/.config/hypr/bindings.lua
-sed -i '/nosignal.deckshift/d; /SUPER + ALT + G/d' ~/.config/hypr/bindings.lua
+sed -i '/nosignal.deckshift/d; /DeckShift — toggle the Gaming Mode control panel/d' ~/.config/hypr/bindings.lua
 sed -i '/deckshift-portal-recovery/d' ~/.config/hypr/autostart.lua
 # Pre-4 Omarchy (.conf config):
 sed -i '/switch-to-gaming/d' ~/.config/hypr/bindings.conf
@@ -642,6 +668,8 @@ yay -Rns gamescope-session-git gamescope-session-steam-git
 
 ## Changelog
 
+- **v0.2.3-z13.1** — Z13 fork: merges upstream v0.2.3 (pinned sudoers rules, `Super+Shift+Alt+D` panel key, VT8, `omarchy update`) while keeping the side-button toggle and `omarchy-powerprofiles-set` power profiles.
+- **v0.2.3** — Security fix: stricter sudoers rules for the Gaming Mode performance controls; re-running `./deckshift.sh` replaces the older rules. The installer no longer stops at the system update on Omarchy, whose pacman hook blocks a direct `pacman -Syu`. Session switches no longer flash a `tty2` login prompt. The control panel key moves from `Super+Alt+G` to `Super+Shift+Alt+D`, because the old key also moved windows out of groups; re-running moves an existing bind. Thanks to lo3w3n.
 - **v0.2.2-z13.2** — Z13 fork: `setup_fcitx_silence` no longer appends `env = FCITX_NO_WAYLAND_DIAGNOSE,1` to the dead pre-Quattro `hyprland.conf` (Omarchy 4's Lua provider ignores it); the env is set only via `~/.config/environment.d`.
 - **v0.2.2-z13.1** — Z13 fork: migration-safe session cleanup. The old-file cleanup skips package-owned `/usr/bin/steamos-*` / `jupiter-biosupdate` (`pacman -Qo`), the client package is reinstalled in place instead of removed first, and the install forces `--aur` so `gamescope-session-steam-git` cannot resolve to the conflicting `cachyos/gamescope-session-cachyos`. `--verify` is sudo-aware (no false missing-file list without cached credentials) and checks `sessions.d/steam` so a missing Steam session client is caught. Install and uninstall also remove the retired stack's hook, post-update script, `.pre-hotfix` backup, and stale keybind file.
 - **v0.2.2** — Screen sharing after a Gaming Mode round-trip actually fixed: `switch-to-desktop` writes the recovery marker before the teardown that used to kill it, and `deckshift-portal-recovery` restarts the portal frontend Steam poisons inside gamescope (no more pipewire bounce, and it self-triggers on the broken state). Exiting Gaming Mode no longer clobbers the CPU governor/power profile with a guess. New `./uninstall.sh` with `--dry-run`. Opt-in Gaming Mode session logs from the control panel (dated files under `~/.local/state/omarchy/nosignal.deckshift/`, 10 newest kept). NVIDIA DRM modeset is detected via Omarchy's modprobe/sysfs (not only `/proc/cmdline`) and enabled with the same `nvidia.conf` drop-ins + initramfs rebuild, any bootloader. `--verify` reads `/etc/group` for `video`/`input`/`wheel` so group checks pass without logging out.
